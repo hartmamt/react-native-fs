@@ -37,23 +37,34 @@ RCT_EXPORT_METHOD(readDir:(NSString *)dirPath
 
   NSArray *contents = [fileManager contentsOfDirectoryAtPath:dirPath error:&error];
 
-  contents = [contents rnfs_mapObjectsUsingBlock:^id(NSString *obj, NSUInteger idx) {
-    NSString *path = [dirPath stringByAppendingPathComponent:obj];
-    NSDictionary *attributes = [fileManager attributesOfItemAtPath:path error:nil];
+  NSMutableArray <NSDictionary*> *result = [NSMutableArray arrayWithCapacity:contents.count];
 
-    return @{
-      @"name": obj,
+  for (int i = 0; i < contents.count; i++) {
+    NSString *name = contents[i];
+    if ([name characterAtIndex:0] == '.') {
+      continue;
+    }
+    NSError *attributesError = nil;
+    NSString *path = [dirPath stringByAppendingPathComponent:name];
+    NSDictionary *attributes = [fileManager attributesOfItemAtPath:path error:&attributesError];
+    if (attributesError != nil) {
+      continue;
+    }
+
+    NSDictionary *dict = @{
+      @"name": name,
       @"path": path,
       @"size": [attributes objectForKey:NSFileSize],
       @"type": [attributes objectForKey:NSFileType]
     };
-  }];
+    [result addObject:dict];
+  }
 
   if (error) {
     return callback([self makeErrorPayload:error]);
   }
 
-  callback(@[[NSNull null], contents]);
+  callback(@[[NSNull null], result]);
 }
 
 RCT_EXPORT_METHOD(exists:(NSString *)filepath
@@ -161,14 +172,14 @@ RCT_EXPORT_METHOD(moveFile:(NSString *)filepath
                   callback:(RCTResponseSenderBlock)callback)
 {
     NSFileManager *manager = [NSFileManager defaultManager];
-
+    
     NSError *error = nil;
     BOOL success = [manager moveItemAtPath:filepath toPath:destPath error:&error];
-
+    
     if (!success) {
         return callback([self makeErrorPayload:error]);
     }
-
+    
     callback(@[[NSNull null], [NSNumber numberWithBool:success], destPath]);
 }
 
@@ -177,9 +188,9 @@ RCT_EXPORT_METHOD(downloadFile:(NSString *)urlStr
                   jobId:(nonnull NSNumber *)jobId
                   callback:(RCTResponseSenderBlock)callback)
 {
-
+  
   DownloadParams* params = [DownloadParams alloc];
-
+  
   params.fromUrl = urlStr;
   params.toFile = filepath;
 
@@ -195,7 +206,7 @@ RCT_EXPORT_METHOD(downloadFile:(NSString *)urlStr
   params.errorCallback = ^(NSError* error) {
     return callback([self makeErrorPayload:error]);
   };
-
+  
   params.beginCallback = ^(NSNumber* statusCode, NSNumber* contentLength, NSDictionary* headers) {
     [self.bridge.eventDispatcher sendAppEventWithName:[NSString stringWithFormat:@"DownloadBegin-%@", jobId]
                                                  body:@{@"jobId": jobId,
@@ -203,27 +214,26 @@ RCT_EXPORT_METHOD(downloadFile:(NSString *)urlStr
                                                         @"contentLength": contentLength,
                                                         @"headers": headers}];
   };
-
+  
   params.progressCallback = ^(NSNumber* contentLength, NSNumber* bytesWritten) {
     [self.bridge.eventDispatcher sendAppEventWithName:[NSString stringWithFormat:@"DownloadProgress-%@", jobId]
-                                                 body:@{@"jobId": jobId,
-                                                        @"contentLength": contentLength,
+                                                 body:@{@"contentLength": contentLength,
                                                         @"bytesWritten": bytesWritten}];
   };
 
   if (!self.downloaders) self.downloaders = [[NSMutableDictionary alloc] init];
-
+  
   Downloader* downloader = [Downloader alloc];
 
   [downloader downloadFile:params];
-
+  
   [self.downloaders setValue:downloader forKey:[jobId stringValue]];
 }
 
 RCT_EXPORT_METHOD(stopDownload:(nonnull NSNumber *)jobId)
 {
   Downloader* downloader = [self.downloaders objectForKey:[jobId stringValue]];
-
+  
   if (downloader != nil) {
     [downloader stopDownload];
   }
@@ -251,32 +261,6 @@ RCT_EXPORT_METHOD(pathForBundle:(NSString *)bundleNamed
                                        code:NSFileNoSuchFileError
                                    userInfo:nil].localizedDescription,
                    [NSNull null]]);
-    }
-}
-
-RCT_EXPORT_METHOD(getFSInfo:(RCTResponseSenderBlock)callback)
-{
-    unsigned long long totalSpace = 0;
-    unsigned long long totalFreeSpace = 0;
-    
-    __autoreleasing NSError *error = nil;
-    NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    NSDictionary *dictionary = [[NSFileManager defaultManager] attributesOfFileSystemForPath:[paths lastObject] error: &error];
-    
-    if (dictionary) {
-        NSNumber *fileSystemSizeInBytes = [dictionary objectForKey: NSFileSystemSize];
-        NSNumber *freeFileSystemSizeInBytes = [dictionary objectForKey:NSFileSystemFreeSize];
-        totalSpace = [fileSystemSizeInBytes unsignedLongLongValue];
-        totalFreeSpace = [freeFileSystemSizeInBytes unsignedLongLongValue];
-        
-        callback(@[[NSNull null],
-                   @{
-                       @"totalSpace": [NSNumber numberWithUnsignedLongLong:totalSpace],
-                       @"freeSpace": [NSNumber numberWithUnsignedLongLong:totalFreeSpace]
-                       }
-                   ]);
-    } else {
-        callback(@[error, [NSNull null]]);
     }
 }
 
